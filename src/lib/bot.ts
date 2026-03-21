@@ -193,16 +193,8 @@ export function getBot() {
     fallbackStreamingPlaceholderText: "Thinking...",
   });
 
-  // ── @mention in unsubscribed threads (includes DMs on most platforms) ──
+  // ── @mention or DM (DMs auto-set isMention=true, fall through here) ────
   _bot.onNewMention(async (thread: any, message: any) => {
-    await handleMessage(thread, message, false);
-  });
-
-  // ── Direct messages (explicit handler for platforms like Telegram) ──────
-  _bot.onDirectMessage(async (thread: any, message: any) => {
-    // Skip if already subscribed (onSubscribedMessage handles it)
-    const subscribed = await thread.isSubscribed();
-    if (subscribed) return;
     await handleMessage(thread, message, false);
   });
 
