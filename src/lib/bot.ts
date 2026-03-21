@@ -50,9 +50,10 @@ export function getBot() {
     });
   }
 
-  if (process.env.LINEAR_ACCESS_TOKEN) {
+  if (process.env.LINEAR_ACCESS_TOKEN && process.env.LINEAR_WEBHOOK_SECRET) {
     adapters.linear = createLinearAdapter({
       accessToken: process.env.LINEAR_ACCESS_TOKEN,
+      webhookSecret: process.env.LINEAR_WEBHOOK_SECRET,
     });
   }
 
