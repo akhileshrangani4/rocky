@@ -60,6 +60,53 @@ const builtInTools = {
     execute: async (input) => executeCode(input),
   }),
 
+  createPullRequest: tool({
+    description:
+      "Create a pull request on GitHub. Use after pushing a branch with changes.",
+    inputSchema: z.object({
+      repo: z.string().describe("Repository full name, e.g. owner/repo"),
+      branch: z.string().describe("Branch name with changes"),
+      title: z.string().describe("PR title"),
+      body: z.string().describe("PR description in markdown"),
+      baseBranch: z.string().default("main").describe("Base branch to merge into"),
+    }),
+    execute: async (input) => {
+      const token = process.env.GITHUB_TOKEN;
+      if (!token) return { success: false, error: "GITHUB_TOKEN not set" };
+
+      const res = await fetch(
+        `https://api.github.com/repos/${input.repo}/pulls`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github.v3+json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            title: input.title,
+            body: input.body,
+            head: input.branch,
+            base: input.baseBranch,
+          }),
+        },
+      );
+
+      if (!res.ok) {
+        const error = await res.text();
+        return { success: false, error: `PR creation failed: ${error}` };
+      }
+
+      const pr = await res.json();
+      return {
+        success: true,
+        prNumber: pr.number,
+        url: pr.html_url,
+        summary: `Opened PR #${pr.number}: ${pr.title}`,
+      };
+    },
+  }),
+
   browsePage: tool({
     description:
       "Browse a web page to extract information. Use for reading URLs shared in conversations, checking documentation, or verifying deployments.",

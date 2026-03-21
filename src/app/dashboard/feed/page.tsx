@@ -1,58 +1,59 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { DashboardEvent } from "@/lib/events";
 
 export default function FeedPage() {
-  const [events, setEvents] = useState<(DashboardEvent & { timestamp: string })[]>([]);
-  const [connected, setConnected] = useState(false);
+  const [events, setEvents] = useState<(DashboardEvent & { timestamp: number })[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchEvents = useCallback(async () => {
+    try {
+      const res = await fetch("/api/dashboard/stream");
+      if (res.ok) {
+        const data = await res.json();
+        setEvents(data.events ?? []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const evtSource = new EventSource("/api/dashboard/stream");
-
-    evtSource.onopen = () => setConnected(true);
-    evtSource.onerror = () => setConnected(false);
-
-    evtSource.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data) as DashboardEvent;
-        setEvents((prev) => [
-          { ...event, timestamp: new Date().toLocaleTimeString() },
-          ...prev.slice(0, 199),
-        ]);
-      } catch {
-        // ignore parse errors
-      }
-    };
-
-    return () => evtSource.close();
-  }, []);
+    fetchEvents();
+    const interval = setInterval(fetchEvents, 3000);
+    return () => clearInterval(interval);
+  }, [fetchEvents]);
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Live Feed</h1>
-          <p className="text-muted-foreground">Real-time activity stream</p>
+          <p className="text-muted-foreground">Activity stream (updates every 3s)</p>
         </div>
-        <Badge variant={connected ? "default" : "destructive"}>
-          {connected ? "Connected" : "Disconnected"}
-        </Badge>
       </div>
 
       <ScrollArea className="h-[calc(100vh-12rem)] rounded-lg border border-border bg-card">
         <div className="flex flex-col divide-y divide-border">
-          {events.length === 0 && (
+          {loading && (
             <div className="p-8 text-center text-muted-foreground">
-              Waiting for events...
+              Loading...
+            </div>
+          )}
+          {!loading && events.length === 0 && (
+            <div className="p-8 text-center text-muted-foreground">
+              No events yet. Rocky is waiting for instructions.
             </div>
           )}
           {events.map((event, i) => (
             <div key={i} className="flex items-start gap-3 px-4 py-3">
-              <span className="mt-0.5 text-xs text-muted-foreground font-mono tabular-nums">
-                {event.timestamp}
+              <span className="mt-0.5 text-xs text-muted-foreground font-mono tabular-nums shrink-0">
+                {new Date(event.timestamp).toLocaleTimeString()}
               </span>
               <EventBadge type={event.type} />
               <span className="text-sm">

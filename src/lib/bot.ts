@@ -122,7 +122,7 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
     });
 
     await addTaskLog(taskRecord.id, "info", `Request from ${platform}: ${message.text}`);
-    pushEvent({ type: "task_created", task: taskRecord as unknown as Record<string, unknown> });
+    await pushEvent({ type: "task_created", task: taskRecord as unknown as Record<string, unknown> });
 
     try {
       const startTime = Date.now();
@@ -148,13 +148,13 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
         output,
         durationMs,
       });
-      pushEvent({ type: "task_completed", taskId: taskRecord.id });
+      await pushEvent({ type: "task_completed", taskId: taskRecord.id });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       await addTaskLog(taskRecord.id, "error", errorMessage);
       await updateTask(taskRecord.id, { status: "failed", output: errorMessage });
       await thread.post(`Something went wrong: ${errorMessage}`);
-      pushEvent({ type: "task_failed", taskId: taskRecord.id });
+      await pushEvent({ type: "task_failed", taskId: taskRecord.id });
     }
   } else {
     try {
