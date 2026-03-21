@@ -110,7 +110,8 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
   const platformContext = extractPlatformContext(platform, message, thread);
 
   // Acknowledge immediately so the user knows Rocky is working
-  const ack = await thread.post("On it...");
+  let statusMsg = await thread.post("On it...");
+  let lastStatus = "On it...";
 
   const taskRecord = !isFollowUp
     ? await createTask({
@@ -128,17 +129,25 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
     await pushEvent({ type: "task_created", task: taskRecord as unknown as Record<string, unknown> });
   }
 
-  // Progress callback — posts updates to the thread as the agent works
+  // Progress callback — updates status and posts step trail
   const onProgress = async (stepInfo: string) => {
     console.log("[rocky] step", { platform, threadId: thread.id, step: stepInfo });
+
     if (taskRecord) {
       await addTaskLog(taskRecord.id, "info", stepInfo);
       await pushEvent({ type: "task_log", taskId: taskRecord.id, log: { level: "info", message: stepInfo } });
     }
+
+    // Skip duplicate status
+    if (stepInfo === lastStatus) return;
+    lastStatus = stepInfo;
+
+    // Try to edit the status message; if edit fails, post a new one
     try {
-      await ack.edit(stepInfo);
+      await statusMsg.edit(stepInfo);
     } catch {
-      // Edit may fail on some platforms — ignore
+      // Edit not supported or failed — post new message as update trail
+      statusMsg = await thread.post(stepInfo);
     }
   };
 
@@ -154,14 +163,14 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
       onProgress,
     });
 
-    // Delete the "On it..." message and post the actual response
-    try { await ack.delete(); } catch { /* ignore */ }
+    // Update status to show we're finalizing
+    try {
+      await statusMsg.edit("Wrapping up...");
+    } catch { /* ignore */ }
 
-    if (typeof result === "string") {
-      await thread.post(result);
-    } else {
-      await thread.post(result.textStream);
-    }
+    // Post the actual response — try to edit status, fall back to new message
+    try { await statusMsg.delete(); } catch { /* ignore */ }
+    await thread.post(result.textStream);
 
     if (taskRecord) {
       const durationMs = Date.now() - startTime;
@@ -178,8 +187,11 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
     const errorMessage = err instanceof Error ? err.message : "Unknown error";
     console.error("[rocky] error", { platform, threadId: thread.id, error: errorMessage });
 
-    try { await ack.delete(); } catch { /* ignore */ }
-    await thread.post(`Something went wrong: ${errorMessage}`);
+    try {
+      await statusMsg.edit(`Something went wrong: ${errorMessage}`);
+    } catch {
+      await thread.post(`Something went wrong: ${errorMessage}`);
+    }
 
     if (taskRecord) {
       await addTaskLog(taskRecord.id, "error", errorMessage);
