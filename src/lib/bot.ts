@@ -33,6 +33,7 @@ export function getBot() {
   if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_SIGNING_SECRET) {
     adapters.slack = createSlackAdapter({
       signingSecret: process.env.SLACK_SIGNING_SECRET,
+      botToken: process.env.SLACK_BOT_TOKEN,
     });
   }
 
