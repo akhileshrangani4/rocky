@@ -9,58 +9,76 @@ type ExecuteCodeInput = {
 
 export async function executeCode(input: ExecuteCodeInput) {
   let sandbox: Sandbox | undefined;
+  const githubToken = process.env.GITHUB_TOKEN || "";
 
   try {
-    // Create sandbox with git available
     if (input.repo) {
+      // Clone via HTTPS with token for auth
       sandbox = await Sandbox.create({
         runtime: "node24",
-        source: {
-          type: "git",
-          url: `https://github.com/${input.repo}.git`,
-          depth: 1,
-        },
         env: {
-          GITHUB_TOKEN: process.env.GITHUB_TOKEN || "",
+          GITHUB_TOKEN: githubToken,
+          GH_TOKEN: githubToken,
         },
       });
+
+      // Clone the repo with token in URL for auth
+      const cloneUrl = githubToken
+        ? `https://x-access-token:${githubToken}@github.com/${input.repo}.git`
+        : `https://github.com/${input.repo}.git`;
+
+      const clone = await sandbox.runCommand("git", [
+        "clone",
+        "--depth",
+        "1",
+        cloneUrl,
+        "/home/user/repo",
+      ]);
+      if (clone.exitCode !== 0) {
+        return {
+          success: false,
+          error: `Failed to clone repo: ${await clone.stderr()}`,
+        };
+      }
+
+      // Set working directory for subsequent commands
+      await sandbox.runCommand("bash", ["-c", "cd /home/user/repo"]);
     } else {
       sandbox = await Sandbox.create({
         runtime: "node24",
         env: {
-          GITHUB_TOKEN: process.env.GITHUB_TOKEN || "",
+          GITHUB_TOKEN: githubToken,
+          GH_TOKEN: githubToken,
         },
       });
     }
 
-    // Install gh CLI for PR operations
-    await sandbox.runCommand({
-      cmd: "sudo",
-      args: [
-        "dnf",
-        "install",
-        "-y",
-        "https://github.com/cli/cli/releases/download/v2.65.0/gh_2.65.0_linux_amd64.rpm",
-      ],
-      sudo: true,
-    });
+    const workDir = input.repo ? "/home/user/repo" : "/home/user";
 
     // Write files
     if (input.files.length > 0) {
       await sandbox.writeFiles(
         input.files.map((f) => ({
-          path: f.path,
+          path: f.path.startsWith("/") ? f.path : `${workDir}/${f.path}`,
           content: Buffer.from(f.content),
         })),
       );
     }
 
     // Run commands and collect output
-    const outputs: { command: string; stdout: string; stderr: string; exitCode: number }[] = [];
+    const outputs: {
+      command: string;
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+    }[] = [];
 
     for (const cmd of input.commands) {
-      const parts = cmd.split(" ");
-      const result = await sandbox.runCommand(parts[0], parts.slice(1));
+      // Run each command in the work directory
+      const result = await sandbox.runCommand("bash", [
+        "-c",
+        `cd ${workDir} && ${cmd}`,
+      ]);
       const stdout = await result.stdout();
       const stderr = await result.stderr();
       outputs.push({
@@ -70,45 +88,38 @@ export async function executeCode(input: ExecuteCodeInput) {
         exitCode: result.exitCode,
       });
 
-      // Stop on failure
       if (result.exitCode !== 0) {
         break;
       }
     }
 
-    // If branch specified, push changes
+    // If branch specified, commit and push changes
     let pushResult;
     if (input.branch && input.repo) {
+      const pushUrl = `https://x-access-token:${githubToken}@github.com/${input.repo}.git`;
+
       const gitCommands = [
-        ["git", ["config", "user.email", "rocky@bot.dev"]],
-        ["git", ["config", "user.name", "Rocky"]],
-        ["git", ["checkout", "-b", input.branch]],
-        ["git", ["add", "-A"]],
-        ["git", ["commit", "-m", `feat: ${input.branch}`]],
-        [
-          "gh",
-          [
-            "auth",
-            "login",
-            "--with-token",
-          ],
-        ],
-      ] as const;
+        `git config user.email "rocky@rockyy.app"`,
+        `git config user.name "Rocky"`,
+        `git checkout -b ${input.branch}`,
+        `git add -A`,
+        `git commit -m "feat: ${input.branch}"`,
+        `git push ${pushUrl} ${input.branch}`,
+      ];
 
-      for (const [cmd, args] of gitCommands) {
-        await sandbox.runCommand(cmd, [...args]);
+      for (const cmd of gitCommands) {
+        const result = await sandbox.runCommand("bash", [
+          "-c",
+          `cd ${workDir} && ${cmd}`,
+        ]);
+        const exitCode = result.exitCode;
+        if (exitCode !== 0) {
+          const stderr = await result.stderr();
+          pushResult = { exitCode, error: stderr.slice(0, 500) };
+          break;
+        }
+        pushResult = { exitCode: 0, output: "Pushed successfully" };
       }
-
-      // Push using gh
-      const push = await sandbox.runCommand("git", [
-        "push",
-        "origin",
-        input.branch,
-      ]);
-      pushResult = {
-        exitCode: push.exitCode,
-        output: await push.stdout(),
-      };
     }
 
     return {
