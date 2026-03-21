@@ -90,6 +90,8 @@ export function getBot() {
     const platform = getPlatformFromThread(thread);
     const senderId = message.author?.userId ?? message.raw?.user ?? message.id;
 
+    console.log("[rocky] onNewMention", { platform, senderId, threadId: thread.id, text: message.text?.slice(0, 50) });
+
     const allowed = await isUserAllowed(platform, String(senderId));
     if (!allowed) {
       try {
