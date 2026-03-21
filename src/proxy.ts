@@ -7,7 +7,7 @@ const publicPaths = [
   "/api/webhooks",
 ];
 
-export default function proxy(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow public paths

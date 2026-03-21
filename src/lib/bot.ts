@@ -10,7 +10,6 @@ import { handleAgentRequest } from "@/lib/agent";
 import { createTask, addTaskLog, updateTask } from "@/lib/tasks";
 import { pushEvent } from "@/lib/events";
 
-// Lazy adapter initialization to avoid crashing at import time
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _bot: any;
 
@@ -30,6 +29,7 @@ export function getBot() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const adapters: Record<string, any> = {};
 
+  // ── Slack ────────────────────────────────────────────────────────────────
   if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_SIGNING_SECRET) {
     adapters.slack = createSlackAdapter({
       signingSecret: process.env.SLACK_SIGNING_SECRET,
@@ -37,20 +37,36 @@ export function getBot() {
     });
   }
 
-  if (process.env.DISCORD_BOT_TOKEN && process.env.DISCORD_PUBLIC_KEY) {
-    adapters.discord = createDiscordAdapter();
-  }
-
-  if (process.env.TELEGRAM_BOT_TOKEN) {
-    adapters.telegram = createTelegramAdapter();
-  }
-
-  if (process.env.GITHUB_TOKEN && process.env.GITHUB_WEBHOOK_SECRET) {
-    adapters.github = createGitHubAdapter({
-      botUserId: Number(process.env.GITHUB_BOT_USER_ID),
+  // ── Discord ──────────────────────────────────────────────────────────────
+  if (
+    process.env.DISCORD_BOT_TOKEN &&
+    process.env.DISCORD_PUBLIC_KEY &&
+    process.env.DISCORD_APPLICATION_ID
+  ) {
+    adapters.discord = createDiscordAdapter({
+      publicKey: process.env.DISCORD_PUBLIC_KEY,
+      botToken: process.env.DISCORD_BOT_TOKEN,
+      applicationId: process.env.DISCORD_APPLICATION_ID,
     });
   }
 
+  // ── Telegram ─────────────────────────────────────────────────────────────
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    adapters.telegram = createTelegramAdapter({
+      botToken: process.env.TELEGRAM_BOT_TOKEN,
+      secretToken: process.env.TELEGRAM_WEBHOOK_SECRET,
+    });
+  }
+
+  // ── GitHub ───────────────────────────────────────────────────────────────
+  if (process.env.GITHUB_TOKEN && process.env.GITHUB_WEBHOOK_SECRET) {
+    adapters.github = createGitHubAdapter({
+      botUserId: Number(process.env.GITHUB_BOT_USER_ID),
+      webhookSecret: process.env.GITHUB_WEBHOOK_SECRET,
+    });
+  }
+
+  // ── Linear ───────────────────────────────────────────────────────────────
   if (process.env.LINEAR_ACCESS_TOKEN && process.env.LINEAR_WEBHOOK_SECRET) {
     adapters.linear = createLinearAdapter({
       accessToken: process.env.LINEAR_ACCESS_TOKEN,
@@ -71,7 +87,6 @@ export function getBot() {
 
   _bot.onNewMention(async (thread: any, message: any) => {
     const platform = getPlatformFromThread(thread);
-
     const senderId = message.raw?.user ?? message.id;
 
     const allowed = await isUserAllowed(platform, senderId);
