@@ -1,0 +1,46 @@
+{
+  "name": "tmp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@ai-sdk/mcp": "^1.0.30",
+    "@ai-sdk/react": "^3.0.136",
+    "@chat-adapter/discord": "^4.20.2",
+    "@chat-adapter/github": "^4.20.2",
+    "@chat-adapter/linear": "^4.20.2",
+    "@chat-adapter/slack": "^4.20.2",
+    "@chat-adapter/state-redis": "^4.20.2",
+    "@chat-adapter/telegram": "^4.20.2",
+    "@sentry/nextjs": "^10.45.0",
+    "@supabase/supabase-js": "^2.99.3",
+    "@upstash/redis": "^1.37.0",
+    "@vercel/blob": "^2.3.1",
+    "@vercel/sandbox": "^1.9.0",
+    "ai": "^6.0.134",
+    "better-auth": "^1.5.5",
+    "chat": "^4.20.2",
+    "drizzle-orm": "^0.45.1",
+    "next": "16.2.1",
+    "postgres": "^3.4.8",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv-cli": "^11.0.0",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.1",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
