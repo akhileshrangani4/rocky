@@ -209,7 +209,6 @@ export function getBot() {
   if (process.env.TELEGRAM_BOT_TOKEN) {
     adapters.telegram = createTelegramAdapter({
       botToken: process.env.TELEGRAM_BOT_TOKEN,
-      secretToken: process.env.TELEGRAM_WEBHOOK_SECRET,
     });
   }
 
