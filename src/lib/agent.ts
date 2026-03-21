@@ -81,10 +81,11 @@ export type AgentRequest = {
   threadId: string;
   taskId?: string;
   history?: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>;
+  platformContext?: string;
 };
 
 export async function handleAgentRequest(request: AgentRequest) {
-  const { message, platform, threadId, taskId, history } = request;
+  const { message, platform, threadId, taskId, history, platformContext } = request;
 
   // Load external tools (cached after first call)
   const [mcpTools, composioTools] = await Promise.all([
@@ -127,9 +128,14 @@ If a user asks you to do something and you have a tool for it, use the tool.`,
   // Build messages array with conversation history
   const messages: Array<{ role: "user" | "assistant" | "system"; content: string }> = [];
 
+  const systemContent = [
+    `[Platform: ${platform}] [Thread: ${threadId}]`,
+    platformContext ? `\n--- Platform Context ---\n${platformContext}` : "",
+  ].join("");
+
   messages.push({
     role: "system" as const,
-    content: `[Platform: ${platform}] [Thread: ${threadId}]`,
+    content: systemContent,
   });
 
   if (history?.length) {

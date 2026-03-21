@@ -35,6 +35,46 @@ async function getThreadHistory(thread: any) {
   }
 }
 
+function extractPlatformContext(platform: Platform, message: any, thread: any): string {
+  const parts: string[] = [];
+
+  if (platform === "linear") {
+    const raw = message.raw;
+    if (raw?.comment) {
+      if (raw.comment.issueId) parts.push(`Linear Issue ID: ${raw.comment.issueId}`);
+      if (raw.comment.body) parts.push(`Comment: ${raw.comment.body}`);
+    }
+    // Thread ID encodes the issue ID
+    if (thread.id) parts.push(`Thread: ${thread.id}`);
+    // Try to get issue URL from the webhook payload
+    if (raw?.url) parts.push(`URL: ${raw.url}`);
+  }
+
+  if (platform === "github") {
+    const raw = message.raw;
+    if (raw?.issue) {
+      parts.push(`GitHub Issue #${raw.issue.number}: ${raw.issue.title}`);
+      if (raw.issue.body) parts.push(`Issue body: ${raw.issue.body.slice(0, 1000)}`);
+      if (raw.issue.html_url) parts.push(`URL: ${raw.issue.html_url}`);
+    }
+    if (raw?.pull_request) {
+      parts.push(`GitHub PR #${raw.pull_request.number}: ${raw.pull_request.title}`);
+      if (raw.pull_request.body) parts.push(`PR body: ${raw.pull_request.body.slice(0, 1000)}`);
+      if (raw.pull_request.html_url) parts.push(`URL: ${raw.pull_request.html_url}`);
+    }
+    if (raw?.repository) {
+      parts.push(`Repo: ${raw.repository.full_name}`);
+    }
+  }
+
+  if (platform === "slack") {
+    // Slack channel context
+    if (thread.channelId) parts.push(`Channel: ${thread.channelId}`);
+  }
+
+  return parts.join("\n");
+}
+
 // Shared handler for processing messages from any platform
 async function handleMessage(thread: any, message: any, isFollowUp = false) {
   const platform = getPlatformFromThread(thread);
@@ -68,6 +108,9 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
 
   const history = await getThreadHistory(thread);
 
+  // Extract platform-specific context (e.g., Linear issue details, GitHub PR info)
+  const platformContext = extractPlatformContext(platform, message, thread);
+
   if (!isFollowUp) {
     const taskRecord = await createTask({
       type: "general",
@@ -89,6 +132,7 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
         threadId: thread.id,
         taskId: taskRecord.id,
         history,
+        platformContext,
       });
 
       if (typeof result === "string") {
@@ -119,6 +163,7 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
         platform,
         threadId: thread.id,
         history,
+        platformContext,
       });
 
       if (typeof result === "string") {
