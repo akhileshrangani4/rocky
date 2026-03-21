@@ -24,6 +24,115 @@ function getPlatformFromThread(thread: { id: string }): Platform {
   return "slack";
 }
 
+async function getThreadHistory(thread: any) {
+  try {
+    await thread.refresh();
+    const recentMessages = thread.recentMessages ?? [];
+    return await toAiMessages(recentMessages);
+  } catch {
+    // Some platforms (Telegram) don't support fetching history
+    return [];
+  }
+}
+
+// Shared handler for processing messages from any platform
+async function handleMessage(thread: any, message: any, isFollowUp = false) {
+  const platform = getPlatformFromThread(thread);
+  const senderId = String(
+    message.author?.userId ?? message.raw?.from?.id ?? message.raw?.user ?? message.id,
+  );
+
+  console.log("[rocky] handleMessage", {
+    platform,
+    senderId,
+    threadId: thread.id,
+    isFollowUp,
+    text: message.text?.slice(0, 50),
+  });
+
+  const allowed = await isUserAllowed(platform, senderId);
+  if (!allowed) {
+    console.log("[rocky] unauthorized", { platform, senderId });
+    try {
+      await thread.postEphemeral(senderId, "You're not authorized to use Rocky.");
+    } catch {
+      await thread.post("You're not authorized to use Rocky.");
+    }
+    return;
+  }
+
+  if (!isFollowUp) {
+    await thread.subscribe();
+  }
+  await thread.startTyping();
+
+  const history = await getThreadHistory(thread);
+
+  if (!isFollowUp) {
+    const taskRecord = await createTask({
+      type: "general",
+      status: "running",
+      platform,
+      threadId: thread.id,
+      requestedBy: senderId,
+      input: message.text,
+    });
+
+    await addTaskLog(taskRecord.id, "info", `Request from ${platform}: ${message.text}`);
+    pushEvent({ type: "task_created", task: taskRecord as unknown as Record<string, unknown> });
+
+    try {
+      const startTime = Date.now();
+      const result = await handleAgentRequest({
+        message: message.text,
+        platform,
+        threadId: thread.id,
+        taskId: taskRecord.id,
+        history,
+      });
+
+      if (typeof result === "string") {
+        await thread.post(result);
+      } else {
+        await thread.post(result.textStream);
+      }
+
+      const durationMs = Date.now() - startTime;
+      const output = typeof result === "string" ? result : "Streamed response";
+      await updateTask(taskRecord.id, {
+        status: "completed",
+        output,
+        durationMs,
+      });
+      pushEvent({ type: "task_completed", taskId: taskRecord.id });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      await addTaskLog(taskRecord.id, "error", errorMessage);
+      await updateTask(taskRecord.id, { status: "failed", output: errorMessage });
+      await thread.post(`Something went wrong: ${errorMessage}`);
+      pushEvent({ type: "task_failed", taskId: taskRecord.id });
+    }
+  } else {
+    try {
+      const result = await handleAgentRequest({
+        message: message.text,
+        platform,
+        threadId: thread.id,
+        history,
+      });
+
+      if (typeof result === "string") {
+        await thread.post(result);
+      } else {
+        await thread.post(result.textStream);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      await thread.post(`Something went wrong: ${errorMessage}`);
+    }
+  }
+}
+
 export function getBot() {
   if (_bot) return _bot;
 
@@ -84,110 +193,22 @@ export function getBot() {
     fallbackStreamingPlaceholderText: "Thinking...",
   });
 
-  // ── Main handler: user @mentions Rocky ─────────────────────────────────
-
+  // ── @mention in unsubscribed threads (includes DMs on most platforms) ──
   _bot.onNewMention(async (thread: any, message: any) => {
-    const platform = getPlatformFromThread(thread);
-    const senderId = message.author?.userId ?? message.raw?.user ?? message.id;
+    await handleMessage(thread, message, false);
+  });
 
-    console.log("[rocky] onNewMention", { platform, senderId, threadId: thread.id, text: message.text?.slice(0, 50) });
-
-    const allowed = await isUserAllowed(platform, String(senderId));
-    if (!allowed) {
-      try {
-        await thread.postEphemeral(senderId, "You're not authorized to use Rocky.");
-      } catch {
-        await thread.post("You're not authorized to use Rocky.");
-      }
-      return;
-    }
-
-    await thread.subscribe();
-    await thread.startTyping();
-
-    // Fetch conversation history for context
-    await thread.refresh();
-    const recentMessages = thread.recentMessages ?? [];
-    const history = await toAiMessages(recentMessages);
-
-    const taskRecord = await createTask({
-      type: "general",
-      status: "running",
-      platform,
-      threadId: thread.id,
-      requestedBy: senderId,
-      input: message.text,
-    });
-
-    await addTaskLog(taskRecord.id, "info", `Request from ${platform}: ${message.text}`);
-    pushEvent({ type: "task_created", task: taskRecord as unknown as Record<string, unknown> });
-
-    try {
-      const startTime = Date.now();
-      const result = await handleAgentRequest({
-        message: message.text,
-        platform,
-        threadId: thread.id,
-        taskId: taskRecord.id,
-        history,
-      });
-
-      if (typeof result === "string") {
-        await thread.post(result);
-      } else {
-        await thread.post(result.textStream);
-      }
-
-      const durationMs = Date.now() - startTime;
-      const output = typeof result === "string" ? result : "Streamed response";
-      await updateTask(taskRecord.id, {
-        status: "completed",
-        output,
-        durationMs,
-      });
-      pushEvent({ type: "task_completed", taskId: taskRecord.id });
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      await addTaskLog(taskRecord.id, "error", errorMessage);
-      await updateTask(taskRecord.id, { status: "failed", output: errorMessage });
-      await thread.post(`Something went wrong: ${errorMessage}`);
-      pushEvent({ type: "task_failed", taskId: taskRecord.id });
-    }
+  // ── Direct messages (explicit handler for platforms like Telegram) ──────
+  _bot.onDirectMessage(async (thread: any, message: any) => {
+    // Skip if already subscribed (onSubscribedMessage handles it)
+    const subscribed = await thread.isSubscribed();
+    if (subscribed) return;
+    await handleMessage(thread, message, false);
   });
 
   // ── Follow-up messages in subscribed threads ───────────────────────────
-
   _bot.onSubscribedMessage(async (thread: any, message: any) => {
-    const platform = getPlatformFromThread(thread);
-    const senderId = message.author?.userId ?? message.raw?.user ?? message.id;
-
-    const allowed = await isUserAllowed(platform, senderId);
-    if (!allowed) return;
-
-    await thread.startTyping();
-
-    // Fetch conversation history for context
-    await thread.refresh();
-    const recentMessages = thread.recentMessages ?? [];
-    const history = await toAiMessages(recentMessages);
-
-    try {
-      const result = await handleAgentRequest({
-        message: message.text,
-        platform,
-        threadId: thread.id,
-        history,
-      });
-
-      if (typeof result === "string") {
-        await thread.post(result);
-      } else {
-        await thread.post(result.textStream);
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      await thread.post(`Something went wrong: ${errorMessage}`);
-    }
+    await handleMessage(thread, message, true);
   });
 
   return _bot;
