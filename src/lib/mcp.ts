@@ -1,86 +1,50 @@
 import { createMCPClient } from "@ai-sdk/mcp";
+import { getDb, schema } from "@/db";
+import { eq } from "drizzle-orm";
 
-type MCPServerConfig = {
-  name: string;
-  url: string;
-  headers?: Record<string, string>;
+type MCPConnection = {
+  client: { tools: () => Promise<Record<string, unknown>>; close: () => Promise<void> };
+  serverId: string;
 };
 
-// MCP servers Rocky can connect to — configure via env vars
-function getMCPServers(): MCPServerConfig[] {
-  const servers: MCPServerConfig[] = [];
-
-  // GitHub MCP — repos, PRs, issues, code search
-  if (process.env.GITHUB_MCP_URL) {
-    servers.push({
-      name: "github",
-      url: process.env.GITHUB_MCP_URL,
-      headers: process.env.GITHUB_TOKEN
-        ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
-        : undefined,
-    });
-  }
-
-  // Linear MCP — issues, projects, teams
-  if (process.env.LINEAR_MCP_URL) {
-    servers.push({
-      name: "linear",
-      url: process.env.LINEAR_MCP_URL,
-      headers: process.env.LINEAR_ACCESS_TOKEN
-        ? { Authorization: process.env.LINEAR_ACCESS_TOKEN }
-        : undefined,
-    });
-  }
-
-  // Vercel MCP — projects, deployments, logs
-  if (process.env.VERCEL_MCP_URL) {
-    servers.push({
-      name: "vercel",
-      url: process.env.VERCEL_MCP_URL,
-    });
-  }
-
-  // Custom MCP servers
-  // Format: CUSTOM_MCP_1_URL, CUSTOM_MCP_1_NAME, CUSTOM_MCP_1_TOKEN
-  for (let i = 1; i <= 5; i++) {
-    const url = process.env[`CUSTOM_MCP_${i}_URL`];
-    const name = process.env[`CUSTOM_MCP_${i}_NAME`] ?? `custom-${i}`;
-    const token = process.env[`CUSTOM_MCP_${i}_TOKEN`];
-    if (url) {
-      servers.push({
-        name,
-        url,
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-    }
-  }
-
-  return servers;
-}
-
-// Cache MCP clients to avoid reconnecting on every request
 let _mcpTools: Record<string, unknown> | null = null;
-let _mcpClients: Array<{ close: () => Promise<void> }> = [];
+let _connections: MCPConnection[] = [];
+
+async function getEnabledServers() {
+  const db = getDb();
+  return db
+    .select()
+    .from(schema.mcpServer)
+    .where(eq(schema.mcpServer.enabled, true));
+}
 
 export async function getMCPTools(): Promise<Record<string, unknown>> {
   if (_mcpTools) return _mcpTools;
 
-  const servers = getMCPServers();
+  const servers = await getEnabledServers();
   if (servers.length === 0) return {};
 
   const allTools: Record<string, unknown> = {};
 
   for (const server of servers) {
     try {
+      const headers: Record<string, string> = {};
+
+      if (server.authType === "bearer" && server.authToken) {
+        headers["Authorization"] = `Bearer ${server.authToken}`;
+      } else if (server.authType === "header" && server.headerName && server.authToken) {
+        headers[server.headerName] = server.authToken;
+      }
+
       const client = await createMCPClient({
         transport: {
           type: "http",
           url: server.url,
-          headers: server.headers,
+          headers: Object.keys(headers).length > 0 ? headers : undefined,
         },
       });
 
-      _mcpClients.push(client);
+      _connections.push({ client, serverId: server.id });
       const tools = await client.tools();
       Object.assign(allTools, tools);
 
@@ -94,9 +58,15 @@ export async function getMCPTools(): Promise<Record<string, unknown>> {
   return allTools;
 }
 
-// Cleanup — call on shutdown if needed
+// Force refresh — call when MCP servers are added/removed
+export function invalidateMCPCache() {
+  _mcpTools = null;
+  _connections.forEach((c) => c.client.close().catch(() => {}));
+  _connections = [];
+}
+
 export async function closeMCPClients() {
-  await Promise.all(_mcpClients.map((c) => c.close().catch(() => {})));
-  _mcpClients = [];
+  await Promise.all(_connections.map((c) => c.client.close().catch(() => {})));
+  _connections = [];
   _mcpTools = null;
 }

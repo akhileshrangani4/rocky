@@ -39,6 +39,12 @@ export default async function DashboardLayout({
               >
                 Admin
               </Link>
+              <Link
+                href="/dashboard/admin/mcp"
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                MCP
+              </Link>
             </nav>
           </div>
           <UserNav

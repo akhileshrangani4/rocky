@@ -77,6 +77,21 @@ export const allowedPlatformUser = pgTable("allowed_platform_user", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const mcpServer = pgTable("mcp_server", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  url: text("url").notNull(),
+  authType: text("auth_type").notNull().default("none"), // none, bearer, header
+  authToken: text("auth_token"), // encrypted or raw token
+  headerName: text("header_name"), // custom header name if authType=header
+  enabled: boolean("enabled").notNull().default(true),
+  addedBy: text("added_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const allowedRepo = pgTable("allowed_repo", {
   id: text("id")
     .primaryKey()
