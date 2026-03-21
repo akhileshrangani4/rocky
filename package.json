@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:generate": "dotenv -e .env.local -- npx drizzle-kit generate",
+    "db:migrate": "dotenv -e .env.local -- npx drizzle-kit migrate",
     "db:push": "dotenv -e .env.local -- npx drizzle-kit push",
     "db:studio": "dotenv -e .env.local -- npx drizzle-kit studio"
   },
