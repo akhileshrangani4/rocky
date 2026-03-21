@@ -107,40 +107,63 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
   await thread.startTyping();
 
   const history = await getThreadHistory(thread);
-
-  // Extract platform-specific context (e.g., Linear issue details, GitHub PR info)
   const platformContext = extractPlatformContext(platform, message, thread);
 
-  if (!isFollowUp) {
-    const taskRecord = await createTask({
-      type: "general",
-      status: "running",
-      platform,
-      threadId: thread.id,
-      requestedBy: senderId,
-      input: message.text,
-    });
+  // Acknowledge immediately so the user knows Rocky is working
+  const ack = await thread.post("On it...");
 
-    await addTaskLog(taskRecord.id, "info", `Request from ${platform}: ${message.text}`);
-    await pushEvent({ type: "task_created", task: taskRecord as unknown as Record<string, unknown> });
-
-    try {
-      const startTime = Date.now();
-      const result = await handleAgentRequest({
-        message: message.text,
+  const taskRecord = !isFollowUp
+    ? await createTask({
+        type: "general",
+        status: "running",
         platform,
         threadId: thread.id,
-        taskId: taskRecord.id,
-        history,
-        platformContext,
-      });
+        requestedBy: senderId,
+        input: message.text,
+      })
+    : null;
 
-      if (typeof result === "string") {
-        await thread.post(result);
-      } else {
-        await thread.post(result.textStream);
-      }
+  if (taskRecord) {
+    await addTaskLog(taskRecord.id, "info", `Request from ${platform}: ${message.text}`);
+    await pushEvent({ type: "task_created", task: taskRecord as unknown as Record<string, unknown> });
+  }
 
+  // Progress callback — posts updates to the thread as the agent works
+  const onProgress = async (stepInfo: string) => {
+    console.log("[rocky] step", { platform, threadId: thread.id, step: stepInfo });
+    if (taskRecord) {
+      await addTaskLog(taskRecord.id, "info", stepInfo);
+      await pushEvent({ type: "task_log", taskId: taskRecord.id, log: { level: "info", message: stepInfo } });
+    }
+    try {
+      await ack.edit(stepInfo);
+    } catch {
+      // Edit may fail on some platforms — ignore
+    }
+  };
+
+  try {
+    const startTime = Date.now();
+    const result = await handleAgentRequest({
+      message: message.text,
+      platform,
+      threadId: thread.id,
+      taskId: taskRecord?.id,
+      history,
+      platformContext,
+      onProgress,
+    });
+
+    // Delete the "On it..." message and post the actual response
+    try { await ack.delete(); } catch { /* ignore */ }
+
+    if (typeof result === "string") {
+      await thread.post(result);
+    } else {
+      await thread.post(result.textStream);
+    }
+
+    if (taskRecord) {
       const durationMs = Date.now() - startTime;
       const output = typeof result === "string" ? result : "Streamed response";
       await updateTask(taskRecord.id, {
@@ -149,31 +172,19 @@ async function handleMessage(thread: any, message: any, isFollowUp = false) {
         durationMs,
       });
       await pushEvent({ type: "task_completed", taskId: taskRecord.id });
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      console.log("[rocky] completed", { taskId: taskRecord.id, durationMs, platform });
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : "Unknown error";
+    console.error("[rocky] error", { platform, threadId: thread.id, error: errorMessage });
+
+    try { await ack.delete(); } catch { /* ignore */ }
+    await thread.post(`Something went wrong: ${errorMessage}`);
+
+    if (taskRecord) {
       await addTaskLog(taskRecord.id, "error", errorMessage);
       await updateTask(taskRecord.id, { status: "failed", output: errorMessage });
-      await thread.post(`Something went wrong: ${errorMessage}`);
       await pushEvent({ type: "task_failed", taskId: taskRecord.id });
-    }
-  } else {
-    try {
-      const result = await handleAgentRequest({
-        message: message.text,
-        platform,
-        threadId: thread.id,
-        history,
-        platformContext,
-      });
-
-      if (typeof result === "string") {
-        await thread.post(result);
-      } else {
-        await thread.post(result.textStream);
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      await thread.post(`Something went wrong: ${errorMessage}`);
     }
   }
 }

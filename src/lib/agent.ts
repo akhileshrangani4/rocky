@@ -129,10 +129,11 @@ export type AgentRequest = {
   taskId?: string;
   history?: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>;
   platformContext?: string;
+  onProgress?: (step: string) => Promise<void>;
 };
 
 export async function handleAgentRequest(request: AgentRequest) {
-  const { message, platform, threadId, taskId, history, platformContext } = request;
+  const { message, platform, threadId, taskId, history, platformContext, onProgress } = request;
 
   // Load external tools (cached after first call)
   const [mcpTools, composioTools] = await Promise.all([
@@ -234,10 +235,43 @@ Use your tools — don't say you can't do something if you have the tools to do 
   const result = await agent.stream({
     messages,
     onStepFinish: async (step) => {
+      const toolCalls = step.toolCalls?.map((tc) => tc.toolName) ?? [];
+      const toolNames = toolCalls.join(", ");
+
+      // Human-readable progress messages
+      const progressMap: Record<string, string> = {
+        executeCode: "Running code in sandbox...",
+        createPullRequest: "Opening pull request...",
+        browsePage: "Browsing web page...",
+      };
+
+      let statusMsg = "Thinking...";
+      if (toolNames) {
+        // Use the first recognized tool for the status message
+        for (const name of toolCalls) {
+          if (progressMap[name]) {
+            statusMsg = progressMap[name];
+            break;
+          }
+        }
+        // Fallback for Composio tools
+        if (statusMsg === "Thinking...") {
+          if (toolNames.toLowerCase().includes("github")) statusMsg = "Working with GitHub...";
+          else if (toolNames.toLowerCase().includes("linear")) statusMsg = "Updating Linear...";
+          else if (toolNames.toLowerCase().includes("calendar")) statusMsg = "Managing calendar...";
+          else if (toolNames.toLowerCase().includes("slack")) statusMsg = "Sending on Slack...";
+          else if (toolNames.toLowerCase().includes("gmail")) statusMsg = "Handling email...";
+          else statusMsg = `Using ${toolNames}...`;
+        }
+      }
+
+      if (onProgress && toolNames) {
+        await onProgress(statusMsg);
+      }
+
       if (taskId) {
-        const toolCalls = step.toolCalls?.map((tc) => tc.toolName).join(", ");
-        const logMsg = toolCalls
-          ? `Step completed - tools used: ${toolCalls}`
+        const logMsg = toolNames
+          ? `Step completed - tools used: ${toolNames}`
           : "Step completed - text generated";
         await addTaskLog(taskId, "info", logMsg);
       }
