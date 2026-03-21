@@ -198,6 +198,12 @@ export function getBot() {
     await handleMessage(thread, message, false);
   });
 
+  // ── Linear/GitHub comments (these adapters don't set isMention) ────────
+  // Catch all new messages that mention "rocky" in the text body
+  _bot.onNewMessage(/rocky/i, async (thread: any, message: any) => {
+    await handleMessage(thread, message, false);
+  });
+
   // ── Follow-up messages in subscribed threads ───────────────────────────
   _bot.onSubscribedMessage(async (thread: any, message: any) => {
     await handleMessage(thread, message, true);
