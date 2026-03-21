@@ -88,11 +88,15 @@ export function getBot() {
 
   _bot.onNewMention(async (thread: any, message: any) => {
     const platform = getPlatformFromThread(thread);
-    const senderId = message.raw?.user ?? message.id;
+    const senderId = message.author?.userId ?? message.raw?.user ?? message.id;
 
-    const allowed = await isUserAllowed(platform, senderId);
+    const allowed = await isUserAllowed(platform, String(senderId));
     if (!allowed) {
-      await thread.postEphemeral(senderId, "You're not authorized to use Rocky.");
+      try {
+        await thread.postEphemeral(senderId, "You're not authorized to use Rocky.");
+      } catch {
+        await thread.post("You're not authorized to use Rocky.");
+      }
       return;
     }
 
@@ -153,7 +157,7 @@ export function getBot() {
 
   _bot.onSubscribedMessage(async (thread: any, message: any) => {
     const platform = getPlatformFromThread(thread);
-    const senderId = message.raw?.user ?? message.id;
+    const senderId = message.author?.userId ?? message.raw?.user ?? message.id;
 
     const allowed = await isUserAllowed(platform, senderId);
     if (!allowed) return;
