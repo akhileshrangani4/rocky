@@ -150,16 +150,40 @@ export type AgentRequest = {
   platform: string;
   threadId: string;
   taskId?: string;
+  history?: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>;
 };
 
 export async function handleAgentRequest(request: AgentRequest) {
-  const { message, platform, threadId, taskId } = request;
+  const { message, platform, threadId, taskId, history } = request;
 
-  const contextPrompt = `[Platform: ${platform}] [Thread: ${threadId}]\n\nUser message: ${message}`;
+  // Build messages array with conversation history
+  const messages: Array<{ role: "user" | "assistant" | "system"; content: string }> = [];
+
+  // Add system context
+  messages.push({
+    role: "system" as const,
+    content: `[Platform: ${platform}] [Thread: ${threadId}]`,
+  });
+
+  // Add conversation history
+  if (history?.length) {
+    for (const msg of history) {
+      const role = msg.role === "assistant" ? "assistant" as const : "user" as const;
+      const content = typeof msg.content === "string"
+        ? msg.content
+        : msg.content.map((p) => p.text ?? "").join("");
+      if (content.trim()) {
+        messages.push({ role, content });
+      }
+    }
+  }
+
+  // Add the current message
+  messages.push({ role: "user" as const, content: message });
 
   // Use streaming for responsiveness
   const result = await rockyAgent.stream({
-    prompt: contextPrompt,
+    messages,
     onStepFinish: async (step) => {
       if (taskId) {
         const toolCalls = step.toolCalls?.map((tc) => tc.toolName).join(", ");

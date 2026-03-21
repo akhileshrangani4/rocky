@@ -5,6 +5,7 @@ import { createTelegramAdapter } from "@chat-adapter/telegram";
 import { createGitHubAdapter } from "@chat-adapter/github";
 import { createLinearAdapter } from "@chat-adapter/linear";
 import { createRedisState } from "@chat-adapter/state-redis";
+import { toAiMessages } from "chat";
 import { isUserAllowed, type Platform } from "@/lib/allowed-users";
 import { handleAgentRequest } from "@/lib/agent";
 import { createTask, addTaskLog, updateTask } from "@/lib/tasks";
@@ -98,6 +99,11 @@ export function getBot() {
     await thread.subscribe();
     await thread.startTyping();
 
+    // Fetch conversation history for context
+    await thread.refresh();
+    const recentMessages = thread.recentMessages ?? [];
+    const history = await toAiMessages(recentMessages);
+
     const taskRecord = await createTask({
       type: "general",
       status: "running",
@@ -117,6 +123,7 @@ export function getBot() {
         platform,
         threadId: thread.id,
         taskId: taskRecord.id,
+        history,
       });
 
       if (typeof result === "string") {
@@ -153,11 +160,17 @@ export function getBot() {
 
     await thread.startTyping();
 
+    // Fetch conversation history for context
+    await thread.refresh();
+    const recentMessages = thread.recentMessages ?? [];
+    const history = await toAiMessages(recentMessages);
+
     try {
       const result = await handleAgentRequest({
         message: message.text,
         platform,
         threadId: thread.id,
+        history,
       });
 
       if (typeof result === "string") {
