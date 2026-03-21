@@ -1,5 +1,7 @@
 import { ToolLoopAgent, tool, stepCountIs } from "ai";
 import { z } from "zod";
+import { Composio } from "@composio/core";
+import { VercelProvider } from "@composio/vercel";
 import { scheduleMeeting } from "@/lib/tools/calendar";
 import { createLinearIssue } from "@/lib/tools/linear";
 import { createPullRequest, searchRepo } from "@/lib/tools/github";
@@ -10,7 +12,29 @@ import { addTaskLog } from "@/lib/tasks";
 
 const MODEL = "openai/gpt-5.4" as const;
 
-// Built-in tools that are always available
+// ── Composio setup ──────────────────────────────────────────────────────────
+
+let _composioTools: Record<string, unknown> | null = null;
+
+async function getComposioTools(): Promise<Record<string, unknown>> {
+  if (_composioTools) return _composioTools;
+  if (!process.env.COMPOSIO_API_KEY) return {};
+
+  try {
+    const composio = new Composio({ provider: new VercelProvider() });
+    const session = await composio.create("rocky-agent");
+    const tools = await session.tools();
+    _composioTools = tools as Record<string, unknown>;
+    console.log(`[rocky] Composio loaded ${Object.keys(tools).length} tools`);
+    return _composioTools;
+  } catch (err) {
+    console.error("[rocky] Composio failed to load:", err);
+    return {};
+  }
+}
+
+// ── Built-in tools ──────────────────────────────────────────────────────────
+
 const builtInTools = {
   scheduleMeeting: tool({
     description:
@@ -124,6 +148,8 @@ const builtInTools = {
   }),
 };
 
+// ── Agent request handler ───────────────────────────────────────────────────
+
 export type AgentRequest = {
   message: string;
   platform: string;
@@ -135,13 +161,21 @@ export type AgentRequest = {
 export async function handleAgentRequest(request: AgentRequest) {
   const { message, platform, threadId, taskId, history } = request;
 
-  // Load MCP tools (cached after first call)
-  const mcpTools = await getMCPTools();
+  // Load external tools (cached after first call)
+  const [mcpTools, composioTools] = await Promise.all([
+    getMCPTools(),
+    getComposioTools(),
+  ]);
 
-  // Merge built-in tools with MCP tools
-  const allTools = { ...builtInTools, ...mcpTools } as typeof builtInTools;
+  // Merge all tools: built-in + MCP + Composio
+  const allTools = {
+    ...builtInTools,
+    ...mcpTools,
+    ...composioTools,
+  } as typeof builtInTools;
 
-  // Create agent with all tools
+  const externalToolCount = Object.keys(mcpTools).length + Object.keys(composioTools).length;
+
   const agent = new ToolLoopAgent({
     model: MODEL,
     instructions: `You are Rocky, a personal AI ops agent. You help your user across Slack, Discord, GitHub, Linear, and Telegram.
@@ -153,7 +187,7 @@ You can:
 - Write code and open pull requests
 - Browse web pages for context
 - Execute code in sandboxes
-${Object.keys(mcpTools).length > 0 ? `- Use ${Object.keys(mcpTools).length} additional tools from connected services (MCP)` : ""}
+${externalToolCount > 0 ? `- Use ${externalToolCount} additional tools from connected services (Composio, MCP)` : ""}
 
 When implementing features:
 1. First understand what the user wants by reading the conversation context
@@ -163,7 +197,8 @@ When implementing features:
 5. Open a PR with the changes
 
 Always be concise in chat responses. Use markdown formatting.
-When you complete a task, summarize what you did clearly.`,
+When you complete a task, summarize what you did clearly.
+If a user asks you to do something and you have a tool for it, use the tool. Don't say you can't do something if you have the tools to do it.`,
     tools: allTools,
     stopWhen: stepCountIs(15),
   });
