@@ -1,18 +1,20 @@
 import { getRecentTasks } from "@/lib/tasks";
 import { TaskOverview } from "@/components/dashboard/task-overview";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardPage() {
   const tasks = await getRecentTasks(100);
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayTasks = tasks.filter((t) => t.createdAt >= todayStart);
+  // Show all tasks from the last 24 hours (timezone-safe)
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const recentTasks = tasks.filter((t) => t.createdAt >= cutoff);
 
   const stats = {
-    total: todayTasks.length,
-    completed: todayTasks.filter((t) => t.status === "completed").length,
-    running: todayTasks.filter((t) => t.status === "running").length,
-    failed: todayTasks.filter((t) => t.status === "failed").length,
+    total: recentTasks.length,
+    completed: recentTasks.filter((t) => t.status === "completed").length,
+    running: recentTasks.filter((t) => t.status === "running").length,
+    failed: recentTasks.filter((t) => t.status === "failed").length,
   };
 
   return (
@@ -20,7 +22,7 @@ export default async function DashboardPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground">
-          Today&apos;s overview of Rocky&apos;s activity across all platforms.
+          Rocky&apos;s activity in the last 24 hours.
         </p>
       </div>
 
@@ -33,7 +35,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Recent tasks */}
-      <TaskOverview tasks={todayTasks} />
+      <TaskOverview tasks={recentTasks} />
     </div>
   );
 }
